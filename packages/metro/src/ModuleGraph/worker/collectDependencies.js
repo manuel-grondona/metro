@@ -797,6 +797,7 @@ class DefaultModuleDependencyRegistry<TSplitCondition = void>
   registerDependency(
     qualifier: ImportQualifier,
   ): InternalDependency<TSplitCondition> {
+    // TODO: for alias (babel-plugin-module-resolver)
     qualifier.name = qualifier.name.replace('@/', './');
     let dependency: ?InternalDependency<TSplitCondition> = this._dependencies.get(
       qualifier.name,

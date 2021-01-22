@@ -76,6 +76,7 @@ function constantFoldingPlugin(context: {types: Types, ...}): Visitors {
 
         if (binding && !binding.referenced) {
           state.stripped = true;
+          //FixME: node_modules/react-native-svg/src/lib/SvgTouchableMixin.ts epxort default function
           parentPath?.remove();
         }
       }

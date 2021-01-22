@@ -245,10 +245,17 @@ async function removeUnUsedExports(
                     module.importee.exportDefault.references === 0) ||
                   exportedName !== 'default'
                 ) {
+                  // $FlowFixMe
+                  const subDependecyImportee = module.dependencies.get(source).data.data.importee;
                   removeSpecifier();
+                  if (exportedName === 'isString') {
+                    console.log(module.path, dependency.importee);
+                    
+                  }
                   dependency.importee.exportDefault.references--;
                   /* because of generate code will use it，should remove shaking dependency */
-                  if (wasNoReferences(dependency.importee)) {
+                  subDependecyImportee.exportDefault.references--;
+                  if (wasNoReferences(subDependecyImportee)) {
                     module.dependencies.delete(source);
                   }
                   if (
