@@ -18,12 +18,12 @@ const collectDependencies = require('metro/src/ModuleGraph/worker/collectDepende
 const generateImportNames = require('metro/src/ModuleGraph/worker/generateImportNames');
 const generate = require('@babel/generator').default;
 const getCacheKey = require('metro-cache-key');
-const getMinifier = require('./utils/getMinifier');
 const metroTransformPlugins = require('metro-transform-plugins');
 const {transformFromAstSync} = require('@babel/core');
 const {stableHash} = require('metro-cache');
 const types = require('@babel/types');
 const countLines = require('metro/src/lib/countLines');
+const getMinifier = require('metro-transform-worker/src/utils/getMinifier');
 
 const {
   fromRawMappings,
@@ -31,7 +31,10 @@ const {
   toSegmentTuple,
 } = require('metro-source-map');
 import type {TransformResultDependency} from 'metro/src/DeltaBundler';
-import type {AllowOptionalDependencies} from 'metro/src/DeltaBundler/types.flow.js';
+import type {
+  JsTransformerConfig,
+  JsTransformOptions,
+} from 'metro-transform-worker';
 import type {DynamicRequiresBehavior} from 'metro/src/ModuleGraph/worker/collectDependencies';
 import type {
   BasicSourceMap,
@@ -42,10 +45,8 @@ import type {
   HermesCompilerResult,
   Options as HermesCompilerOptions,
 } from 'metro-hermes-compiler';
-import type {
-  CustomTransformOptions,
-  TransformProfile,
-} from 'metro-babel-transformer';
+
+import type {Module, MixedOutput} from 'metro/src/DeltaBundler/types.flow';
 
 type MinifierConfig = $ReadOnly<{[string]: mixed, ...}>;
 
@@ -68,43 +69,6 @@ export type Minifier = MinifierOptions => MinifierResult;
 
 export type Type = 'script' | 'module' | 'asset';
 
-export type JsTransformerConfig = $ReadOnly<{|
-  assetPlugins: $ReadOnlyArray<string>,
-  assetRegistryPath: string,
-  asyncRequireModulePath: string,
-  babelTransformerPath: string,
-  dynamicDepsInPackages: DynamicRequiresBehavior,
-  enableBabelRCLookup: boolean,
-  enableBabelRuntime: boolean,
-  experimentalImportBundleSupport: boolean,
-  globalPrefix: string,
-  minifierConfig: MinifierConfig,
-  minifierPath: string,
-  optimizationSizeLimit: number,
-  publicPath: string,
-  allowOptionalDependencies: AllowOptionalDependencies,
-  experimentalTreeShaking: boolean,
-  treeShakingPathIgnore: (absolutePath: string) => boolean,
-|}>;
-
-export type {CustomTransformOptions} from 'metro-babel-transformer';
-
-export type JsTransformOptions = $ReadOnly<{|
-  customTransformOptions?: CustomTransformOptions,
-  dev: boolean,
-  experimentalImportSupport?: boolean,
-  hot: boolean,
-  inlinePlatform: boolean,
-  inlineRequires: boolean,
-  minify: boolean,
-  nonInlinedRequires?: $ReadOnlyArray<string>,
-  platform: ?string,
-  runtimeBytecodeVersion: ?number,
-  type: Type,
-  unstable_disableES6Transforms?: boolean,
-  unstable_transformProfile: TransformProfile,
-|}>;
-
 export type JsOutput = $ReadOnly<{|
   data: $ReadOnly<{|
     code: string,
@@ -121,9 +85,8 @@ export type BytecodeOutput = $ReadOnly<{|
 |}>;
 
 type Result = {|
-  output: $ReadOnlyArray<JsOutput | BytecodeOutput>,
   sourceAst?: BabelNodeFile,
-  namedExports: Array<string>,
+  output: $ReadOnlyArray<JsOutput | BytecodeOutput>,
   dependencies: $ReadOnlyArray<TransformResultDependency>,
 |};
 
@@ -223,113 +186,37 @@ module.exports = {
   transform: async (
     config: JsTransformerConfig,
     projectRoot: string,
-    filename: string,
-    data: Buffer,
+    module: Module<MixedOutput>,
     options: JsTransformOptions,
   ): Promise<Result> => {
-    const sourceCode = data.toString('utf8');
     let type = 'js/module';
     let bytecodeType = 'bytecode/module';
+    const filename = module.path;
+    const sourceCode = module.getSource().toString();
 
-    if (options.type === 'asset') {
-      type = 'js/module/asset';
-      bytecodeType = 'bytecode/module/asset';
-    }
     if (options.type === 'script') {
       type = 'js/script';
       bytecodeType = 'bytecode/script';
     }
 
-    if (filename.endsWith('.json')) {
-      let code = JsFileWrapping.wrapJson(sourceCode, config.globalPrefix);
-      let map = [];
-
-      if (options.minify) {
-        ({map, code} = await minifyCode(
-          config,
-          projectRoot,
-          filename,
-          code,
-          sourceCode,
-          map,
-        ));
-      }
-
-      const output = [
-        {
-          data: {code, lineCount: countLines(code), map, functionMap: null},
-          type,
-        },
-      ];
-      if (options.runtimeBytecodeVersion) {
-        output.push({
-          data: (compileToBytecode(code, type, {
-            sourceURL: filename,
-            sourceMap: fromRawMappings([
-              {
-                code,
-                source: sourceCode,
-                map,
-                functionMap: null,
-                path: filename,
-              },
-            ]).toString(),
-          }): HermesCompilerResult),
-          type: bytecodeType,
-        });
-      }
-
-      return {
-        output,
-        namedExports: [],
-        dependencies: [],
-      };
-    }
-
-    const transformerArgs = {
+    const babelConfig = {
+      caller: {name: 'metro', bundler: 'metro', platform: options.platform},
+      ast: true,
+      babelrc: config.enableBabelRCLookup,
+      code: false,
+      highlightCode: true,
       filename,
-      options: {
-        ...options,
-        enableBabelRCLookup: config.enableBabelRCLookup,
-        enableBabelRuntime: config.enableBabelRuntime,
-        globalPrefix: config.globalPrefix,
-        // Inline requires are now performed at a secondary step. We cannot
-        // unfortunately remove it from the internal transformer, since this one
-        // is used by other tooling, and this would affect it.
-        inlineRequires: false,
-        nonInlinedRequires: [],
-        projectRoot,
-        publicPath: config.publicPath,
-      },
       plugins: [],
-      src: sourceCode,
+      sourceType: 'unambiguous',
     };
-
-    let transformResult;
-
-    if (type === 'js/module/asset') {
-      const assetTransformer = require('./utils/assetTransformer');
-
-      transformResult = {
-        ...(await assetTransformer.transform(
-          transformerArgs,
-          config.assetRegistryPath,
-          config.assetPlugins,
-        )),
-        functionMap: null,
-      };
-    } else {
-      // $FlowFixMe TODO t26372934 Plugin system
-      const transformer: Transformer<*> = require(config.babelTransformerPath);
-      transformResult = await transformer.transform(transformerArgs);
-    }
+    // $FlowFixMe TODO t26372934 Plugin system
+    let ast =
+      transformFromAstSync(module.sourceAst, '', babelConfig).ast ||
+      babylon.parse(sourceCode, {sourceType: 'unambiguous'});
 
     // Transformers can output null ASTs (if they ignore the file). In that case
     // we need to parse the module source code to get their AST.
-    let ast =
-      transformResult.ast ||
-      babylon.parse(sourceCode, {sourceType: 'unambiguous'});
-    const sourceAst = transformResult.sourceAst || ast;
+    const sourceAst = module.sourceAst || ast;
 
     const {importDefault, importAll} = generateImportNames(ast);
     // Add "use strict" if the file was parsed as a module, and the directive did
@@ -338,10 +225,9 @@ module.exports = {
 
     if (
       ast.program.sourceType === 'module' &&
-      // $FlowFixMe[incompatible-use]
+      directives &&
       directives.findIndex(d => d.value.value === 'use strict') === -1
     ) {
-      // $FlowFixMe[incompatible-use]
       directives.push(types.directive(types.directiveLiteral('use strict')));
     }
 
@@ -391,7 +277,6 @@ module.exports = {
     let dependencyMapName = '';
     let dependencies;
     let wrappedAst;
-    let namedExports = [];
 
     // If the module to transform is a script (meaning that is not part of the
     // dependency graph and it code will just be prepended to the bundle modules),
@@ -414,7 +299,6 @@ module.exports = {
         };
         const result = collectDependencies(ast, sourceAst, opts);
         ast = result.ast;
-        namedExports = result.namedExports;
         dependencies = result.dependencies;
         dependencyMapName = result.dependencyMapName;
       } catch (error) {
@@ -434,7 +318,7 @@ module.exports = {
     }
 
     const reserved =
-      options.minify && data.length <= config.optimizationSizeLimit
+      options.minify && sourceCode.length <= config.optimizationSizeLimit
         ? metroTransformPlugins.normalizePseudoGlobals(wrappedAst)
         : [];
 
@@ -472,7 +356,8 @@ module.exports = {
           code,
           lineCount: countLines(code),
           map,
-          functionMap: transformResult.functionMap,
+          // $FlowFixMe
+          functionMap: module.output[0].data.functionMap,
         },
         type,
       },
@@ -492,9 +377,7 @@ module.exports = {
 
     return {
       output,
-      sourceAst,
       dependencies,
-      namedExports,
     };
   },
 

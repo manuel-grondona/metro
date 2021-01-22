@@ -219,7 +219,15 @@ async function processModule<T>(
     dependencies: new Map(),
     getSource: result.getSource,
     output: result.output,
+    namedExports: result.namedExports,
+    sourceAst: result.sourceAst,
+    importee: {
+      exports: {},
+      exportAll: {references: 0},
+      exportDefault: {references: 0},
+    },
   };
+
   graph.dependencies.set(module.path, module);
 
   for (const [relativePath, dependency] of currentDependencies) {

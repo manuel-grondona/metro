@@ -25,6 +25,7 @@ import type {CallExpression, Identifier, StringLiteral} from '@babel/types';
 import type {
   AllowOptionalDependencies,
   AsyncDependencyType,
+  TransformResultExportModules,
 } from 'metro/src/DeltaBundler/types.flow.js';
 
 type ImportDependencyOptions = $ReadOnly<{
@@ -46,6 +47,7 @@ type DependencyData<TSplitCondition> = $ReadOnly<{
   // If left unspecified, then the dependency is unconditionally split.
   splitCondition?: TSplitCondition,
   locs: Array<BabelSourceLocation>,
+  importee: TransformResultExportModules,
 }>;
 
 export type MutableInternalDependency<TSplitCondition> = {
@@ -82,6 +84,7 @@ export type Options<TSplitCondition = void> = $ReadOnly<{
 
 export type CollectedDependencies<+TSplitCondition> = $ReadOnly<{
   ast: BabelNodeFile,
+  namedExports: Array<string>,
   dependencyMapName: string,
   dependencies: $ReadOnlyArray<Dependency<TSplitCondition>>,
 }>;
@@ -94,6 +97,8 @@ export interface ModuleDependencyRegistry<+TSplitCondition> {
   registerDependency(
     qualifier: ImportQualifier,
   ): InternalDependency<TSplitCondition>;
+  registerExport(name: string): void;
+  getExports(): Array<string>;
   getDependencies(): Array<InternalDependency<TSplitCondition>>;
 }
 
@@ -126,6 +131,12 @@ export interface DependencyTransformer<-TSplitCondition> {
 
 export type DynamicRequiresBehavior = 'throwAtRuntime' | 'reject';
 
+type PartialTransformResultExportModules = {
+  exports?: $PropertyType<TransformResultExportModules, 'exports'>,
+  exportAll?: $PropertyType<TransformResultExportModules, 'exportAll'>,
+  exportDefault?: $PropertyType<TransformResultExportModules, 'exportDefault'>,
+};
+
 /**
  * Transform all the calls to `require()` and `import()` in a file into ID-
  * independent code, and return the list of dependencies. For example, a call
@@ -137,6 +148,7 @@ export type DynamicRequiresBehavior = 'throwAtRuntime' | 'reject';
  */
 function collectDependencies<TSplitCondition = void>(
   ast: BabelNodeFile,
+  sourceAst: BabelNodeFile,
   options: Options<TSplitCondition>,
 ): CollectedDependencies<TSplitCondition> {
   const visited = new WeakSet();
@@ -235,10 +247,200 @@ function collectDependencies<TSplitCondition = void>(
 
   traverse(ast, visitor, null, state);
 
+  const treeShakingVisitor = {
+    ImportDeclaration(path, state) {
+      const name = path.node.source.value;
+      const specifiers = path.node.specifiers;
+
+      if (path.node.importKind === 'type') {
+        return;
+      }
+      const dependency = state.dependencyRegistry
+        .getDependencies()
+        .find(d => d.name === name);
+
+      if (typeof path.node.importKind === 'undefined') {
+        // import "./core"
+        registerDependency(
+          state,
+          {
+            name,
+            asyncType: dependency?.asyncType || null,
+            optional: dependency?.isOptional || false,
+            // $FlowFixMe no partial unity type
+            importee: {
+              exportDefault: {
+                references: 1,
+              },
+            },
+          },
+          path,
+        );
+      }
+
+      if (specifiers.length !== 0) {
+        const importee: PartialTransformResultExportModules = {
+          exports: {},
+        };
+        importee.exports = {};
+        path.node.specifiers.forEach(sp => {
+          if (sp.type === 'ImportDefaultSpecifier') {
+            importee.exportDefault = {
+              references: 1,
+            };
+          }
+          if (sp.type === 'ImportSpecifier') {
+            // $FlowFixMe
+            importee.exports[sp.imported.name] = {
+              references: 1,
+            };
+          }
+          if (sp.type === 'ImportNamespaceSpecifier') {
+            importee.exportAll = {
+              references: 1,
+            };
+          }
+        });
+        registerDependency(
+          state,
+          {
+            name,
+            asyncType: dependency?.asyncType || null,
+            optional: dependency?.isOptional || false,
+            importee,
+          },
+          path,
+        );
+      }
+    },
+    CallExpression(path, state) {
+      const node = path.node;
+      const callee = path.node.callee;
+      const calleeName = callee.type === 'Identifier' ? callee.name : null;
+      const isRequire =
+        calleeName === 'require' && !path.scope.getBinding(calleeName);
+      if (
+        (node.callee.type === 'Import' || isRequire) &&
+        node.arguments.length &&
+        node.arguments[0].type === 'StringLiteral'
+      ) {
+        const name = node.arguments[0].value;
+        const dependency = state.dependencyRegistry
+          .getDependencies()
+          .find(d => d.name === name);
+        registerDependency(
+          state,
+          {
+            name,
+            asyncType: dependency?.asyncType || null,
+            optional: dependency?.isOptional || false,
+            // $FlowFixMe
+            importee: {
+              exportDefault: {
+                references: 1,
+              },
+            },
+          },
+          path,
+        );
+      }
+    },
+    ExportAllDeclaration(path, state) {
+      const name = path.node.source.value;
+      const dependency = state.dependencyRegistry
+        .getDependencies()
+        .find(d => d.name === name);
+      registerDependency(
+        state,
+        {
+          name,
+          asyncType: dependency?.asyncType || null,
+          optional: dependency?.isOptional || false,
+          // $FlowFixMe
+          importee: {
+            exportAll: {
+              references: 1,
+            },
+          },
+        },
+        path,
+      );
+    },
+    ExportNamedDeclaration(path, state) {
+      const specifiers = path.node.specifiers || [];
+      const declaration = path.node.declaration;
+      if (!path.node.source) {
+        // export {A}
+        specifiers.forEach(sp => {
+          if (sp.type === 'ExportSpecifier') {
+            state.dependencyRegistry.registerExport(sp.exported.name);
+          }
+        });
+        // export const A = 'A', B = 'B';
+        if (declaration?.type === 'VariableDeclaration') {
+          declaration.declarations.forEach(decl => {
+            if (decl.id.type === 'Identifier') {
+              state.dependencyRegistry.registerExport(decl.id.name);
+            }
+          });
+        }
+        // export function; export class
+        if (
+          declaration &&
+          ['FunctionDeclaration', 'ClassDeclaration'].includes(declaration.type)
+        ) {
+          if (declaration.id && declaration.id.type === 'Identifier') {
+            state.dependencyRegistry.registerExport(declaration.id.name);
+          }
+        }
+        return;
+      } else if (path.node.exportKind === 'type' || specifiers.length === 0) {
+        return;
+      }
+      const importee: PartialTransformResultExportModules = {
+        exports: {},
+      };
+      const name = path.node.source.value;
+      const dependency = state.dependencyRegistry
+        .getDependencies()
+        .find(d => d.name === name);
+      specifiers.forEach(sp => {
+        if (sp.type === 'ExportNamespaceSpecifier') {
+          importee.exportAll = {
+            references: 1,
+          };
+        }
+        if (sp.type === 'ExportSpecifier') {
+          if (sp.local.name === 'default') {
+            importee.exportDefault = {
+              references: 1,
+            };
+          } else {
+            // $FlowFixMe
+            importee.exports[sp.exported.name] = {
+              references: 1,
+            };
+          }
+        }
+      });
+      registerDependency(
+        state,
+        {
+          name,
+          asyncType: dependency?.asyncType || null,
+          optional: dependency?.isOptional || false,
+          importee,
+        },
+        path,
+      );
+    },
+  };
+  traverse(sourceAst, treeShakingVisitor, null, state);
+
+  const namedExports = state.dependencyRegistry.getExports();
   const collectedDependencies = state.dependencyRegistry.getDependencies();
   // Compute the list of dependencies.
   const dependencies = new Array(collectedDependencies.length);
-
   for (const {index, name, ...dependencyData} of collectedDependencies) {
     dependencies[index] = {
       name,
@@ -248,6 +450,7 @@ function collectDependencies<TSplitCondition = void>(
 
   return {
     ast,
+    namedExports,
     dependencies,
     dependencyMapName: nullthrows(state.dependencyMapIdentifier).name,
   };
@@ -341,12 +544,13 @@ function getNearestLocFromPath(path: NodePath<>): ?BabelSourceLocation {
   return current?.node.loc;
 }
 
-export type ImportQualifier = $ReadOnly<{
+export type ImportQualifier = {
   name: string,
   asyncType: AsyncDependencyType | null,
   splitCondition?: NodePath<>,
   optional: boolean,
-}>;
+  importee?: PartialTransformResultExportModules,
+};
 
 function registerDependency<TSplitCondition>(
   state: State<TSplitCondition>,
@@ -358,6 +562,44 @@ function registerDependency<TSplitCondition>(
   const loc = getNearestLocFromPath(path);
   if (loc != null) {
     dependency.locs.push(loc);
+  }
+  const {importee} = qualifier;
+
+  if (importee) {
+    if (importee.exports) {
+      Object.keys(importee.exports).forEach(key => {
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            dependency.importee.exports,
+            key,
+          )
+        ) {
+          dependency.importee.exports[key] = {
+            references: 1,
+          };
+        } else {
+          dependency.importee.exports[key].references++;
+        }
+      });
+    }
+
+    if (importee.exportAll) {
+      if (!dependency.importee.exportAll) {
+        dependency.importee.exportAll = {references: 1};
+      } else {
+        dependency.importee.exportAll.references +=
+          importee.exportAll.references;
+      }
+    }
+
+    if (importee.exportDefault) {
+      if (!dependency.importee.exportDefault) {
+        dependency.importee.exportDefault = {references: 1};
+      } else {
+        dependency.importee.exportDefault.references +=
+          importee.exportDefault.references;
+      }
+    }
   }
 
   return dependency;
@@ -550,11 +792,12 @@ function createModuleNameLiteral(dependency: InternalDependency<mixed>) {
 
 class DefaultModuleDependencyRegistry<TSplitCondition = void>
   implements ModuleDependencyRegistry<TSplitCondition> {
+  _exports: Set<string> = new Set();
   _dependencies: Map<string, InternalDependency<TSplitCondition>> = new Map();
-
   registerDependency(
     qualifier: ImportQualifier,
   ): InternalDependency<TSplitCondition> {
+    qualifier.name = qualifier.name.replace('@/', './');
     let dependency: ?InternalDependency<TSplitCondition> = this._dependencies.get(
       qualifier.name,
     );
@@ -565,6 +808,26 @@ class DefaultModuleDependencyRegistry<TSplitCondition = void>
         asyncType: qualifier.asyncType,
         locs: [],
         index: this._dependencies.size,
+        importee: qualifier.importee
+          ? {
+              exports: {},
+              exportAll: {
+                references: 0,
+              },
+              exportDefault: {
+                references: 0,
+              },
+              ...qualifier.importee,
+            }
+          : {
+              exports: {},
+              exportAll: {
+                references: 0,
+              },
+              exportDefault: {
+                references: 0,
+              },
+            },
       };
 
       if (qualifier.optional) {
@@ -582,6 +845,14 @@ class DefaultModuleDependencyRegistry<TSplitCondition = void>
     }
 
     return dependency;
+  }
+
+  registerExport(name: string) {
+    this._exports.add(name);
+  }
+
+  getExports(): Array<string> {
+    return [...this._exports];
   }
 
   getDependencies(): Array<InternalDependency<TSplitCondition>> {
