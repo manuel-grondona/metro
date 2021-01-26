@@ -403,6 +403,7 @@ module.exports = {
     } else {
       try {
         const opts = {
+          filename,
           asyncRequireModulePath: config.asyncRequireModulePath,
           dynamicRequires: getDynamicDepsBehavior(
             config.dynamicDepsInPackages,

@@ -36,6 +36,7 @@ const {any, objectContaining} = expect;
 
 const {InvalidRequireCallError} = collectDependencies;
 const opts = {
+  filename: 'index.js',
   asyncRequireModulePath: 'asyncRequire',
   dynamicRequires: 'reject',
   inlineableCalls: [],
@@ -364,6 +365,7 @@ describe('Evaluating static arguments', () => {
   it('throws at runtime when requiring non-strings with special option', () => {
     const {ast, sourceAst} = astFromCode('require(1)');
     const opts = {
+      filename: 'index.js',
       asyncRequireModulePath: 'asyncRequire',
       dynamicRequires: 'throwAtRuntime',
       inlineableCalls: [],
@@ -530,6 +532,7 @@ it('records locations of dependencies', () => {
 
 describe('optional dependencies', () => {
   const opts: Options<> = {
+    filename: 'index.js',
     asyncRequireModulePath: 'asyncRequire',
     dynamicRequires: 'reject',
     inlineableCalls: [],

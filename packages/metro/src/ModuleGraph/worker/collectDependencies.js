@@ -17,6 +17,7 @@ const generate = require('@babel/generator').default;
 const template = require('@babel/template').default;
 const traverse = require('@babel/traverse').default;
 const types = require('@babel/types');
+const path = require('path');
 
 const {isImport} = types;
 
@@ -72,6 +73,7 @@ export type State<TSplitCondition> = {
 };
 
 export type Options<TSplitCondition = void> = $ReadOnly<{
+  filename: string,
   asyncRequireModulePath: string,
   dependencyMapName?: string,
   dynamicRequires: DynamicRequiresBehavior,
@@ -100,6 +102,7 @@ export interface ModuleDependencyRegistry<+TSplitCondition> {
   registerExport(name: string): void;
   getExports(): Array<string>;
   getDependencies(): Array<InternalDependency<TSplitCondition>>;
+  constructor(filename: string): void;
 }
 
 export interface DependencyTransformer<-TSplitCondition> {
@@ -157,7 +160,8 @@ function collectDependencies<TSplitCondition = void>(
     asyncRequireModulePathStringLiteral: null,
     dependencyCalls: new Set(),
     dependencyRegistry:
-      options.dependencyRegistry ?? new DefaultModuleDependencyRegistry(),
+      options.dependencyRegistry ??
+      new DefaultModuleDependencyRegistry(options.filename),
     dependencyTransformer:
       options.dependencyTransformer ?? DefaultDependencyTransformer,
     dependencyMapIdentifier: null,
@@ -792,13 +796,22 @@ function createModuleNameLiteral(dependency: InternalDependency<mixed>) {
 
 class DefaultModuleDependencyRegistry<TSplitCondition = void>
   implements ModuleDependencyRegistry<TSplitCondition> {
+  _filename: string;
   _exports: Set<string> = new Set();
   _dependencies: Map<string, InternalDependency<TSplitCondition>> = new Map();
+  constructor(filename: string) {
+    this._filename = filename;
+  }
   registerDependency(
     qualifier: ImportQualifier,
   ): InternalDependency<TSplitCondition> {
-    // TODO: for alias (babel-plugin-module-resolver)
-    qualifier.name = qualifier.name.replace('@/', './');
+    if (this._filename) {
+      const relativePath = path.relative(path.dirname(this._filename), './');
+      qualifier.name = qualifier.name.replace(
+        '@/',
+        relativePath ? `${relativePath.replace(/\\/g, '/')}/` : './',
+      );
+    }
     let dependency: ?InternalDependency<TSplitCondition> = this._dependencies.get(
       qualifier.name,
     );

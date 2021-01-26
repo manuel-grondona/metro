@@ -100,7 +100,9 @@ async function removeUnUsedExports(
     const visitor = {
       ExportNamedDeclaration(path) {
         const node = path.node;
-
+        if (node.exportKind !== 'value') {
+          return;
+        }
         if (
           'ClassDeclaration' === node.declaration?.type ||
           'FunctionDeclaration' === node.declaration?.type
@@ -172,7 +174,9 @@ async function removeUnUsedExports(
             if (!hasOwnProperty(module.importee.exports, exportedName)) {
               if (!source) {
                 if (path.scope.bindings) {
-                  const bindingPath = path.scope.bindings[exportedName].path;
+                  // export { A as B }
+                  const bindingName = localName || exportedName;
+                  const bindingPath = path.scope.bindings[bindingName].path;
                   const parentPath = bindingPath.parentPath;
 
                   if (
@@ -183,27 +187,32 @@ async function removeUnUsedExports(
                     // $FlowFixMe
                     const {absolutePath} = copyModuleDependencies.get(value);
                     const dependency = globalDependencies.get(absolutePath);
+                     // $FlowFixMe
+                    const subDependecyImportee = module.dependencies.get(value).data.data.importee;
                     // $FlowFixMe
                     parentPath.node.specifiers.forEach((specifier, index) => {
                       // $FlowFixMe
-                      if (specifier.local.name === exportedName) {
+                      if (specifier.local.name === bindingName) {
                         const specifierNode = parentPath.get(
                           `specifiers.${index}`
                         );
                         if (!Array.isArray(specifierNode)) {
                           specifierNode.remove();
                         }
-                      }
 
-                      if (specifier.type === 'ImportSpecifier') {
-                        // $FlowFixMe
-                        dependency.importee.exports[specifier.imported.name]
-                          .references--;
-                      }
+                        if (specifier.type === 'ImportSpecifier') {
+                          // $FlowFixMe
+                          dependency.importee.exports[specifier.imported.name]
+                            .references--;
+                          subDependecyImportee.exports[specifier.imported.name]
+                            .references--;
+                        }
 
-                      if (specifier.type === 'ImportDefaultSpecifier') {
-                        // $FlowFixMe
-                        dependency.importee.exportDefault.references--;
+                        if (specifier.type === 'ImportDefaultSpecifier') {
+                          // $FlowFixMe
+                          dependency.importee.exportDefault.references--;
+                          subDependecyImportee.exportDefault.references--;
+                        }
                       }
                     });
 
@@ -211,10 +220,13 @@ async function removeUnUsedExports(
                       // $FlowFixMe
                       parentPath.node.specifiers.length === 0 &&
                       // $FlowFixMe
-                      !path.scope.bindings[exportedName]
+                      !path.scope.bindings[bindingName]
                     ) {
                       // removed when no specifiers
                       parentPath.remove();
+                      if (wasNoReferences(subDependecyImportee)) {
+                        module.dependencies.delete(value);
+                      }
                       if (
                         !path.scope.path.find(path =>
                           path.isImportDefaultSpecifier()

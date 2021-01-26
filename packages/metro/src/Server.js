@@ -206,12 +206,10 @@ class Server {
         this._config,
         transformOptions,
       );
-      await treeShaking(
-        graph,
-        transformerConfig,
-        this._config.projectRoot,
-        transformerOptions,
-      );
+      await treeShaking(graph, transformerConfig, this._config.projectRoot, {
+        ...transformerOptions,
+        inlineRequires: !!transformerOptions.inlineRequires,
+      });
     }
 
     const entryPoint = path.resolve(this._config.projectRoot, entryFile);
