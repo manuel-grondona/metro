@@ -288,6 +288,7 @@ module.exports = {
     } else {
       try {
         const opts = {
+          dev: options.dev,
           filename,
           asyncRequireModulePath: config.asyncRequireModulePath,
           dynamicRequires: getDynamicDepsBehavior(

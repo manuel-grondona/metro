@@ -62,6 +62,7 @@ function getAppendScripts<T: number | string>(
       sourceAst: babylon.parse(''),
       importee: {
         exports: {},
+        sideEffect: false,
         exportAll: {references: 0},
         exportDefault: {references: 0},
       },
@@ -95,6 +96,7 @@ function getAppendScripts<T: number | string>(
           sourceAst: babylon.parse(''),
           importee: {
             exports: {},
+            sideEffect: false,
             exportAll: {references: 0},
             exportDefault: {references: 0},
           },
@@ -133,6 +135,7 @@ function getAppendScripts<T: number | string>(
       namedExports: [],
       importee: {
         exports: {},
+        sideEffect: false,
         exportAll: {references: 0},
         exportDefault: {references: 0},
       },
@@ -160,6 +163,7 @@ function getAppendScripts<T: number | string>(
       sourceAst: babylon.parse(''),
       importee: {
         exports: {},
+        sideEffect: false,
         exportAll: {references: 0},
         exportDefault: {references: 0},
       },

@@ -18,6 +18,7 @@ export type MixedOutput = {|
 export type AsyncDependencyType = 'async' | 'prefetch';
 
 export type TransformResultExportModules = {
+  sideEffect: boolean,
   exports: {
     [k: string]: {
       references: number,

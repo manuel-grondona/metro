@@ -36,6 +36,7 @@ const {any, objectContaining} = expect;
 
 const {InvalidRequireCallError} = collectDependencies;
 const opts = {
+  dev: false,
   filename: 'index.js',
   asyncRequireModulePath: 'asyncRequire',
   dynamicRequires: 'reject',
@@ -365,6 +366,7 @@ describe('Evaluating static arguments', () => {
   it('throws at runtime when requiring non-strings with special option', () => {
     const {ast, sourceAst} = astFromCode('require(1)');
     const opts = {
+      dev: false,
       filename: 'index.js',
       asyncRequireModulePath: 'asyncRequire',
       dynamicRequires: 'throwAtRuntime',
@@ -532,6 +534,7 @@ it('records locations of dependencies', () => {
 
 describe('optional dependencies', () => {
   const opts: Options<> = {
+    dev: false,
     filename: 'index.js',
     asyncRequireModulePath: 'asyncRequire',
     dynamicRequires: 'reject',
@@ -836,6 +839,7 @@ class MockModuleDependencyRegistry<TSplitCondition>
       locs: [],
       importee: {
         exports: {},
+        sideEffect: false,
         exportAll: {references: 0},
         exportDefault: {references: 0},
       },

@@ -127,6 +127,14 @@ type Result = {|
   dependencies: $ReadOnlyArray<TransformResultDependency>,
 |};
 
+function isTypeScriptSource(fileName) {
+  return !!fileName && fileName.endsWith('.ts');
+}
+
+function isTSXSource(fileName) {
+  return !!fileName && fileName.endsWith('.tsx');
+}
+
 function getDynamicDepsBehavior(
   inPackages: DynamicRequiresBehavior,
   filename: string,
@@ -388,6 +396,58 @@ module.exports = {
       cloneInputAst: false,
     });
 
+    if (!options.dev) {
+      transformFromAstSync(sourceAst, '', {
+        ast: true,
+        babelrc: false,
+        code: false,
+        configFile: false,
+        comments: false,
+        compact: false,
+        filename,
+        plugins: [
+          [metroTransformPlugins.constantFoldingPlugin, opts],
+          [metroTransformPlugins.inlinePlugin, opts],
+        ],
+        sourceMaps: false,
+        cloneInputAst: false,
+        overrides: [
+          // the flow strip types plugin must go BEFORE class properties!
+          // there'll be a test case that fails if you don't.
+          {
+            plugins: [
+              require('@babel/plugin-syntax-flow'),
+              require('@babel/plugin-transform-flow-strip-types'),
+            ],
+          },
+          {
+            test: isTypeScriptSource,
+            plugins: [
+              [
+                require('@babel/plugin-transform-typescript'),
+                {
+                  isTSX: false,
+                  allowNamespaces: true,
+                },
+              ],
+            ],
+          },
+          {
+            test: isTSXSource,
+            plugins: [
+              [
+                require('@babel/plugin-transform-typescript'),
+                {
+                  isTSX: true,
+                  allowNamespaces: true,
+                },
+              ],
+            ],
+          },
+        ],
+      });
+    }
+
     let dependencyMapName = '';
     let dependencies;
     let wrappedAst;
@@ -403,6 +463,7 @@ module.exports = {
     } else {
       try {
         const opts = {
+          dev: options.dev,
           filename,
           asyncRequireModulePath: config.asyncRequireModulePath,
           dynamicRequires: getDynamicDepsBehavior(

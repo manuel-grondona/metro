@@ -5,9 +5,11 @@ Metro.loadConfig().then(async config => {
     entry: 'index.js',
     platform: 'ios',
     dev: false,
+    hot: false,
     out: 'bundle/bundle.ios.js',
     sourceMap: true,
     sourceMapUrl: 'bundle.ios.map',
+    minify: true,
   });
 });
 

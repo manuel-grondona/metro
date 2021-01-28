@@ -223,6 +223,7 @@ async function processModule<T>(
     sourceAst: result.sourceAst,
     importee: {
       exports: {},
+      sideEffect: false,
       exportAll: {references: 0},
       exportDefault: {references: 0},
     },

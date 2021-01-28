@@ -30,10 +30,14 @@ module.exports = (async () => {
     babelTransformerPath: require.resolve('../packages/metro-react-native-babel-transformer'),
   },
   serializer: {
-    getPolyfills: require('react-native/rn-get-polyfills')
+    getPolyfills: require('react-native/rn-get-polyfills'),
+    getModulesRunBeforeMainModule: () => [require.resolve(
+      require.resolve('react-native/Libraries/Core/InitializeCore'),
+    )]
   },
   resolver: {
     sourceExts: ['ios.js', 'android.js', ...sourceExts],
+    blockList: /(website\/node_modules\/.*|.*\/__tests__\/.*)$/,
     resolverMainFields: ['react-native', 'module', ...resolverMainFields],
   },
 }})();

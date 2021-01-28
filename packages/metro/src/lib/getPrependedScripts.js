@@ -94,6 +94,7 @@ function _getPrelude({
     sourceAst: babylon.parse(code),
     importee: {
       exports: {},
+      sideEffect: false,
       exportAll: {references: 0},
       exportDefault: {references: 0},
     },

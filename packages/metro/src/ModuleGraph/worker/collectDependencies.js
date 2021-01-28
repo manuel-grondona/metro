@@ -73,6 +73,7 @@ export type State<TSplitCondition> = {
 };
 
 export type Options<TSplitCondition = void> = $ReadOnly<{
+  dev: boolean,
   filename: string,
   asyncRequireModulePath: string,
   dependencyMapName?: string,
@@ -135,6 +136,7 @@ export interface DependencyTransformer<-TSplitCondition> {
 export type DynamicRequiresBehavior = 'throwAtRuntime' | 'reject';
 
 type PartialTransformResultExportModules = {
+  sideEffect?: boolean,
   exports?: $PropertyType<TransformResultExportModules, 'exports'>,
   exportAll?: $PropertyType<TransformResultExportModules, 'exportAll'>,
   exportDefault?: $PropertyType<TransformResultExportModules, 'exportDefault'>,
@@ -276,6 +278,7 @@ function collectDependencies<TSplitCondition = void>(
               exportDefault: {
                 references: 1,
               },
+              sideEffect: true,
             },
           },
           path,
@@ -303,6 +306,7 @@ function collectDependencies<TSplitCondition = void>(
             importee.exportAll = {
               references: 1,
             };
+            importee.sideEffect = true;
           }
         });
         registerDependency(
@@ -340,9 +344,10 @@ function collectDependencies<TSplitCondition = void>(
             optional: dependency?.isOptional || false,
             // $FlowFixMe
             importee: {
-              exportDefault: {
+              exportAll: {
                 references: 1,
               },
+              sideEffect: true,
             },
           },
           path,
@@ -439,7 +444,10 @@ function collectDependencies<TSplitCondition = void>(
       );
     },
   };
-  traverse(sourceAst, treeShakingVisitor, null, state);
+
+  if (!options.dev) {
+    traverse(sourceAst, treeShakingVisitor, null, state);
+  }
 
   const namedExports = state.dependencyRegistry.getExports();
   const collectedDependencies = state.dependencyRegistry.getDependencies();
@@ -603,6 +611,9 @@ function registerDependency<TSplitCondition>(
         dependency.importee.exportDefault.references +=
           importee.exportDefault.references;
       }
+    }
+    if (importee.sideEffect) {
+      dependency.importee.sideEffect = true;
     }
   }
 
@@ -822,26 +833,18 @@ class DefaultModuleDependencyRegistry<TSplitCondition = void>
         asyncType: qualifier.asyncType,
         locs: [],
         index: this._dependencies.size,
-        importee: qualifier.importee
-          ? {
-              exports: {},
-              exportAll: {
-                references: 0,
-              },
-              exportDefault: {
-                references: 0,
-              },
-              ...qualifier.importee,
-            }
-          : {
-              exports: {},
-              exportAll: {
-                references: 0,
-              },
-              exportDefault: {
-                references: 0,
-              },
-            },
+        // $FlowFixMe
+        importee: {
+          exports: {},
+          sideEffect: false,
+          exportAll: {
+            references: 0,
+          },
+          exportDefault: {
+            references: 0,
+          },
+          ...(qualifier.importee || {}),
+        },
       };
 
       if (qualifier.optional) {

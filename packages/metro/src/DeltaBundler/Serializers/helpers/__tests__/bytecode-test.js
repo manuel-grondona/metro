@@ -41,6 +41,7 @@ beforeEach(() => {
               locs: [],
               importee: {
                 exports: {},
+                sideEffect: false,
                 exportAll: {references: 0},
                 exportDefault: {references: 0},
               },
@@ -59,6 +60,7 @@ beforeEach(() => {
               locs: [],
               importee: {
                 exports: {},
+                sideEffect: false,
                 exportAll: {references: 0},
                 exportDefault: {references: 0},
               },
@@ -73,6 +75,7 @@ beforeEach(() => {
     namedExports: [],
     importee: {
       exports: {},
+      sideEffect: false,
       exportAll: {references: 0},
       exportDefault: {references: 0},
     },

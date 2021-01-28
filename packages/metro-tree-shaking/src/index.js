@@ -43,6 +43,7 @@ function collectExports(
       if (!dependecy) {
         continue;
       }
+      dependecy.importee.sideEffect = dependecy.importee.sideEffect || importee.sideEffect;
       dependecy.importee.exportDefault.references +=
         importee.exportDefault.references;
       Object.keys(importee.exports).forEach(key => {
@@ -59,8 +60,6 @@ function collectExports(
           dependecy.namedExports
         );
         if (intersec.length > 0) {
-          dependecy.importee.exportAll.references +=
-            importee.exportAll.references;
           intersec.forEach(key => {
             if (hasOwnProperty(dependecy.importee.exports, key)) {
               dependecy.importee.exports[key].references++;
@@ -70,6 +69,9 @@ function collectExports(
               };
             }
           });
+        } else {
+          dependecy.importee.exportAll.references +=
+          importee.exportAll.references;
         }
       }
     }
@@ -86,7 +88,7 @@ async function removeUnUsedExports(
   const globalDependencies = graph.dependencies;
   // analyze AST
   for (const [absolutePath, module] of globalDependencies.entries()) {
-    if (treeShakingIgnore(absolutePath)) {
+    if (treeShakingIgnore(absolutePath) || module.importee.sideEffect) {
       continue;
     }
     const traverseState = {
